@@ -180,6 +180,7 @@ typedef struct am_dir_cfg_rec {
     const char *varname;
     int secure;
     int http_only;
+    int use_ssl;
     const char *merge_env_vars;
     int env_vars_index_start;
     int env_vars_count_in_n;
@@ -203,7 +204,9 @@ typedef struct am_dir_cfg_rec {
     /* Lasso configuration variables. */
     const char *sp_metadata_file;
     const char *sp_private_key_file;
+    const char *sp_private_key_path;
     const char *sp_cert_file;
+    const char *sp_cert_path;
     apr_array_header_t *idp_metadata;
     const char *idp_public_key_file;
     const char *idp_ca_file;
