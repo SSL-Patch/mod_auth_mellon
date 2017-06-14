@@ -346,6 +346,44 @@ static CURL *am_httpclient_init_curl(request_rec *r, const char *uri,
         goto cleanup_fail;
     }
 
+    /* Set up SSL if it is enabled */
+    if(cfg->use_ssl) {
+        /* Set the privte key to use for SSL. */
+        res = curl_easy_setopt(curl, CURLOPT_SSLKEY, cfg->sp_private_key_path);
+        if(res == CURLE_UNKNOWN_OPTION ) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "TLS is not supported: [%u] %s",
+                          res, curl_error);
+            goto cleanup_fail;
+        }
+        if(res != CURLE_OK) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "Failed to set private key for SSL: [%u] %s",
+                          res, curl_error);
+            goto cleanup_fail;
+        }
+
+        /* Set the public key to use for SSL. Mellon requires the SP's
+         * certificate to be .pem format (which is the default value for
+         * CURLOPT_SSLCERTTYPE), so it doesn't need to be set here.
+         */
+        res = curl_easy_setopt(curl, CURLOPT_SSLCERT, cfg->sp_cert_path);
+        if(res == CURLE_UNKNOWN_OPTION ) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "TLS is not supported: [%u] %s",
+                          res, curl_error);
+
+            goto cleanup_fail;
+        }
+        if(res != CURLE_OK) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "Failed to set client certificate for SSL: [%u] %s",
+                          res, curl_error);
+
+            goto cleanup_fail;
+        }
+    }
+
     return curl;
 
 
