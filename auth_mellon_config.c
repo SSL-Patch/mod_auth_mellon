@@ -50,6 +50,11 @@ static const int default_secure_cookie = 0;
  */
 static const int default_http_only_cookie = 0;
 
+/* The default setting is to not use SSL client certificate authentication
+ * when making outgoing requests
+ */
+static const int default_use_ssl_client_cert_auth = 0;
+
 /* The default setting for setting MELLON_SESSION
  */
 static const int default_dump_session = 0; 
@@ -228,6 +233,61 @@ static const char *am_set_filestring_slot(cmd_parms *cmd,
 #endif
 
     return ap_set_string_slot(cmd, struct_ptr, data);
+}
+
+
+/* This function handles configuration directives which set the SP's
+ * private key. Given a path, newer versions of lasso will attempt to 
+ * read the file immediately. However, cURL needs the path in order
+ * to support SSL connections, so this function caches the path
+ * under a different variable.
+ *
+ * Parameters:
+ *  cmd_parms *cmd       The command structure for this configuration
+ *                       directive.
+ *  void *struct_ptr     Pointer to the current directory configuration.
+ *                       NULL if we are not in a directory configuration.
+ *                       This value isn't used by this function.
+ *  const char *arg      The string argument following this configuration
+ *                       directive in the configuraion file.
+ *
+ * Returns:
+ *  NULL on success or an error string on failure.
+ */
+static const char *am_set_sp_private_key_slots(cmd_parms *cmd,
+                                            void *struct_ptr,
+                                            const char *arg)
+{
+    am_dir_cfg_rec *d = (am_dir_cfg_rec *)struct_ptr;
+    d->sp_private_key_path = arg;
+    return am_set_filestring_slot(cmd, struct_ptr, arg);
+}
+
+/* This function handles configuration directives which set the SP's
+ * public key. Given a path, newer versions of lasso will attempt to 
+ * read the file immediately. However, cURL needs the path in order
+ * to support SSL connections, so this function caches the path
+ * under a different variable.
+ *
+ * Parameters:
+ *  cmd_parms *cmd       The command structure for this configuration
+ *                       directive.
+ *  void *struct_ptr     Pointer to the current directory configuration.
+ *                       NULL if we are not in a directory configuration.
+ *                       This value isn't used by this function.
+ *  const char *arg      The string argument following this configuration
+ *                       directive in the configuraion file.
+ *
+ * Returns:
+ *  NULL on success or an error string on failure.
+ */
+static const char *am_set_sp_public_key_slots(cmd_parms *cmd,
+                                     void *struct_ptr,
+                                     const char *arg)
+{
+    am_dir_cfg_rec *d = (am_dir_cfg_rec *)struct_ptr;
+    d->sp_cert_path = arg;
+    return am_set_filestring_slot(cmd, struct_ptr, arg);
 }
 
 
@@ -512,6 +572,38 @@ static const char *am_set_secure_slots(cmd_parms *cmd,
 
     return NULL;
 }
+
+
+/* This function handles the MellonUseSSLClientCertAuth configuration
+ * directive. This directive can be set to "on" or "off".
+ *
+ * Parameters:
+ *  cmd_parms *cmd       The command structure for this configuration
+ *                       directive.
+ *  void *struct_ptr     Pointer to the current directory configuration.
+ *  const char *arg      The string argument following this configuration
+ *                       directive in the configuraion file.
+ *
+ * Returns:
+ *  NULL on success or an error string if the argument is wrong.
+ */
+static const char *am_set_use_ssl_client_cert_auth_slot(cmd_parms *cmd,
+                                                       void *struct_ptr,
+                                                       const char *arg)
+{
+    am_dir_cfg_rec *d = (am_dir_cfg_rec *)struct_ptr;
+
+    if(!strcasecmp(arg, "on")) {
+        d->use_ssl_client_cert_auth = 1;
+    } else if(!strcasecmp(arg, "off")) {
+        d->use_ssl_client_cert_auth = 0;
+    } else {
+        return "parameter must be 'on' or 'off'";
+    }
+
+    return NULL;
+}
+
 
 /* This function handles the obsolete MellonDecoder configuration directive.
  * It is a no-op.
@@ -1036,7 +1128,7 @@ const command_rec auth_mellon_commands[] = {
         (void *)APR_OFFSETOF(am_mod_cfg_rec, lock_file),
         RSRC_CONF,
         "The lock file for session synchronization."
-        " Default value is \"/var/run/mod_auth_mellon.lock\"."
+        " Default value is \"/tmp/mellonLock\"."
         ), 
     AP_INIT_TAKE1(
         "MellonPostDirectory",
@@ -1044,7 +1136,7 @@ const command_rec auth_mellon_commands[] = {
         (void *)APR_OFFSETOF(am_mod_cfg_rec, post_dir),
         RSRC_CONF,
         "The directory for saving POST requests."
-        " Not set by default."
+        " Default value is \"/var/tmp/mellonpost\"."
         ), 
     AP_INIT_TAKE1(
         "MellonPostTTL",
@@ -1052,7 +1144,7 @@ const command_rec auth_mellon_commands[] = {
         (void *)APR_OFFSETOF(am_mod_cfg_rec, post_ttl),
         RSRC_CONF,
         "The time to live for saved POST requests in seconds."
-        " Default value is 900 (15 minutes)."
+        " Default value is 15 mn."
         ), 
     AP_INIT_TAKE1(
         "MellonPostCount",
@@ -1068,12 +1160,20 @@ const command_rec auth_mellon_commands[] = {
         (void *)APR_OFFSETOF(am_mod_cfg_rec, post_size),
         RSRC_CONF,
         "The maximum size of a saved POST, in bytes."
-        " Default value is 1048576 (1 MB)."
+        " Default value is 1 MB."
         ), 
 
 
     /* Per-location configuration directives. */
 
+    AP_INIT_TAKE1(
+        "MellonUseSSLClientCertAuth",
+        am_set_use_ssl_client_cert_auth_slot,
+        NULL,
+        OR_AUTHCFG,
+        "Enable SSL when auth_mellon makes a request; uses the keys"
+        " specified by MellonSPCertFile and MellonSPPrivateKeyFile."
+        ),
     AP_INIT_TAKE1(
         "MellonEnable",
         am_set_enable_slot,
@@ -1237,14 +1337,14 @@ const command_rec auth_mellon_commands[] = {
         ),
     AP_INIT_TAKE1(
         "MellonSPPrivateKeyFile",
-        am_set_filestring_slot,
+        am_set_sp_private_key_slots,
         (void *)APR_OFFSETOF(am_dir_cfg_rec, sp_private_key_file),
         OR_AUTHCFG,
         "Full path to pem file with the private key for the SP."
         ),
     AP_INIT_TAKE1(
         "MellonSPCertFile",
-        am_set_filestring_slot,
+        am_set_sp_public_key_slots,
         (void *)APR_OFFSETOF(am_dir_cfg_rec, sp_cert_file),
         OR_AUTHCFG,
         "Full path to pem file with certificate for the SP."
@@ -1483,6 +1583,7 @@ void *auth_mellon_dir_config(apr_pool_t *p, char *d)
     dir->varname = default_cookie_name;
     dir->secure = default_secure_cookie;
     dir->http_only = default_http_only_cookie;
+    dir->use_ssl_client_cert_auth = default_use_ssl_client_cert_auth;
     dir->merge_env_vars = default_merge_env_vars;
     dir->env_vars_index_start = default_env_vars_index_start;
     dir->env_vars_count_in_n = default_env_vars_count_in_n;
@@ -1505,7 +1606,9 @@ void *auth_mellon_dir_config(apr_pool_t *p, char *d)
 
     dir->sp_metadata_file = NULL;
     dir->sp_private_key_file = NULL;
+    dir->sp_private_key_path = NULL;
     dir->sp_cert_file = NULL;
+    dir->sp_cert_path = NULL;
     dir->idp_metadata = apr_array_make(p, 0, sizeof(am_metadata_t));
     dir->idp_public_key_file = NULL;
     dir->idp_ca_file = NULL;
@@ -1610,6 +1713,12 @@ void *auth_mellon_dir_merge(apr_pool_t *p, void *base, void *add)
                         add_cfg->http_only :
                         base_cfg->http_only);
 
+    new_cfg->use_ssl_client_cert_auth = (
+        add_cfg->use_ssl_client_cert_auth != default_use_ssl_client_cert_auth ?
+        add_cfg->use_ssl_client_cert_auth :
+        base_cfg->use_ssl_client_cert_auth
+        );
+
     new_cfg->merge_env_vars = (add_cfg->merge_env_vars != default_merge_env_vars ?
                                add_cfg->merge_env_vars :
                                base_cfg->merge_env_vars);
@@ -1688,9 +1797,17 @@ void *auth_mellon_dir_merge(apr_pool_t *p, void *base, void *add)
                                     add_cfg->sp_private_key_file :
                                     base_cfg->sp_private_key_file);
 
+    new_cfg->sp_private_key_path = (add_cfg->sp_private_key_path ?
+                                    add_cfg->sp_private_key_path :
+                                    base_cfg->sp_private_key_path);
+
     new_cfg->sp_cert_file = (add_cfg->sp_cert_file ?
                              add_cfg->sp_cert_file :
                              base_cfg->sp_cert_file);
+
+    new_cfg->sp_cert_path = (add_cfg->sp_cert_path ?
+                             add_cfg->sp_cert_path :
+                             base_cfg->sp_cert_path);
 
     new_cfg->idp_metadata = (add_cfg->idp_metadata->nelts ?
                              add_cfg->idp_metadata :

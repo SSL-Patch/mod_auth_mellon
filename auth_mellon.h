@@ -180,6 +180,7 @@ typedef struct am_dir_cfg_rec {
     const char *varname;
     int secure;
     int http_only;
+    int use_ssl_client_cert_auth;
     const char *merge_env_vars;
     int env_vars_index_start;
     int env_vars_count_in_n;
@@ -208,6 +209,10 @@ typedef struct am_dir_cfg_rec {
     const char *idp_public_key_file;
     const char *idp_ca_file;
     GList *idp_ignore;
+
+    /* SSL client sertificate authentication variables. */
+    const char *sp_private_key_path;
+    const char *sp_cert_path;
 
     /* metadata autogeneration helper */
     char *sp_entity_id;
@@ -290,7 +295,6 @@ typedef struct am_cache_env_t {
 
 typedef struct am_cache_entry_t {
     char key[AM_CACHE_KEYSIZE];
-    am_cache_storage_t cookie_token;
     apr_time_t access;
     apr_time_t expires;
     int logged_in;
@@ -374,7 +378,6 @@ void *auth_mellon_server_config(apr_pool_t *p, server_rec *s);
 const char *am_cookie_get(request_rec *r);
 void am_cookie_set(request_rec *r, const char *id);
 void am_cookie_delete(request_rec *r);
-const char *am_cookie_token(request_rec *r);
 
 
 void am_cache_init(am_mod_cfg_rec *mod_cfg);
@@ -382,9 +385,7 @@ am_cache_entry_t *am_cache_lock(server_rec *s,
                                 am_cache_key_t type, const char *key);
 const char *am_cache_entry_get_string(am_cache_entry_t *e,
                                       am_cache_storage_t *slot);
-am_cache_entry_t *am_cache_new(server_rec *s,
-                               const char *key,
-                               const char *cookie_token);
+am_cache_entry_t *am_cache_new(server_rec *s, const char *key);
 void am_cache_unlock(server_rec *s, am_cache_entry_t *entry);
 
 void am_cache_update_expires(am_cache_entry_t *t, apr_time_t expires);
