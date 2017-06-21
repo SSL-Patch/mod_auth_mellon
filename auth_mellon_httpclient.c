@@ -98,25 +98,24 @@ static am_hc_block_t *am_hc_block_write(
 {
     apr_size_t num_cpy;
 
-    while(size > 0) {
-        /* Find the number of bytes we should write to this block. */
-        num_cpy = AM_HC_BLOCK_SIZE - block->used;
-        if(num_cpy == 0) {
-            /* This block is full -- allocate a new block. */
-            block->next = am_hc_block_alloc(pool);
-            block = block->next;
-            num_cpy = AM_HC_BLOCK_SIZE;
-        }
-        if(num_cpy > size) {
-            num_cpy = size;
-        }
+    /* Find the number of bytes we should write to this block. */
+    num_cpy = AM_HC_BLOCK_SIZE - block->used;
+    if(num_cpy > size) {
+        num_cpy = size;
+    }
 
-        /* Copy data to this block. */
-        memcpy(&block->data[block->used], data, num_cpy);
-        block->used += num_cpy;
+    /* Copy data to this block. */
+    memcpy(&block->data[block->used], data, num_cpy);
+    block->used += num_cpy;
 
-        size -= num_cpy;
-        data += num_cpy;
+    if(block->used == AM_HC_BLOCK_SIZE) {
+        /* This block is full. Allocate a new block, and continue
+         * filling it.
+         */
+        block->next = am_hc_block_alloc(pool);
+
+        return am_hc_block_write(block->next, pool, &data[num_cpy],
+                                 size - num_cpy);
     }
 
     /* The next write should be to this block. */
@@ -344,6 +343,45 @@ static CURL *am_httpclient_init_curl(request_rec *r, const char *uri,
                       "Failed to set the curl write function data: [%u] %s",
                       res, curl_error);
         goto cleanup_fail;
+    }
+
+    /* Set up SSL client certificate authentication if it is enabled */
+    if(cfg->use_ssl_client_cert_auth) {
+
+        /* Set the private key. */
+        res = curl_easy_setopt(curl, CURLOPT_SSLKEY, cfg->sp_private_key_path);
+        if(res == CURLE_UNKNOWN_OPTION ) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "TLS is not supported: [%u] %s",
+                          res, curl_error);
+            goto cleanup_fail;
+        }
+        if(res != CURLE_OK) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "Failed to set SSL key: [%u] %s",
+                          res, curl_error);
+            goto cleanup_fail;
+        }
+
+        /* Set the public key to use. Mellon requires the SP's certificate to
+         * be .pem format, which is the default value for CURLOPT_SSLCERTTYPE,
+         * so it doesn't need to be set here.
+         */
+        res = curl_easy_setopt(curl, CURLOPT_SSLCERT, cfg->sp_cert_path);
+        if(res == CURLE_UNKNOWN_OPTION ) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "TLS is not supported: [%u] %s",
+                          res, curl_error);
+
+            goto cleanup_fail;
+        }
+        if(res != CURLE_OK) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "Failed to set SSL certificate: [%u] %s",
+                          res, curl_error);
+
+            goto cleanup_fail;
+        }
     }
 
     return curl;
